@@ -11,7 +11,7 @@ const TOKEN = process.env.WHATSAPP_TOKEN || '';
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0';
 const CC = process.env.DEFAULT_COUNTRY_CODE || '225'; // Côte d'Ivoire
-const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '80', 10));
+const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '30', 10));
 const MAX_CONTACTS = parseInt(process.env.MAX_CONTACTS || '5000', 10);
 const WABA_ID = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
 const DELAY_MS = parseInt(process.env.SEND_DELAY_MS || '1200', 10);
@@ -90,11 +90,16 @@ async function sendOne(contact, opts) {
     const text = String(opts.message).replace(/\{nom\}/gi, contact.name || '').replace(/ +,/g, ',').trim();
     body = { messaging_product: 'whatsapp', to: contact.number, type: 'text', text: { body: text, preview_url: false } };
   }
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  let r;
+  try {
+    r = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    throw new Error('NETWORK: ' + (e.cause && (e.cause.code || e.cause.message) || e.message));
+  }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error((data.error && data.error.message) || `HTTP ${r.status}`);
 }
@@ -102,12 +107,12 @@ async function sendOne(contact, opts) {
 const jobs = new Map();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-const RATE_LIMIT = /rate|too many|throughput|limit|HTTP 429|HTTP 5\d\d/i;
+const RATE_LIMIT = /rate|too many|throughput|limit|HTTP 429|HTTP 5\d\d|NETWORK/i;
 async function sendWithRetry(c, opts) {
   for (let attempt = 0; ; attempt++) {
     try { return await sendOne(c, opts); }
     catch (e) {
-      if (attempt >= 5 || !RATE_LIMIT.test(e.message)) throw e;
+      if (attempt >= 6 || !RATE_LIMIT.test(e.message)) throw e;
       await sleep(500 * 2 ** attempt); // 0,5s, 1s, 2s, 4s, 8s
     }
   }
@@ -188,6 +193,19 @@ app.post('/api/templates', auth, async (req, res) => {
     if (!r.ok) return res.status(400).json({ error: graphError(d, r.status) });
     res.json({ id: d.id, status: d.status || 'PENDING' });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/diagnose', auth, async (req, res) => {
+  const out = { phoneId: PHONE_ID, wabaId: WABA_ID, hasToken: Boolean(TOKEN) };
+  const g = async p => {
+    try {
+      const r = await fetch(`https://graph.facebook.com/${API_VERSION}/${p}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+      return await r.json();
+    } catch (e) { return { error: { message: 'NETWORK: ' + (e.cause && (e.cause.code || e.cause.message) || e.message) } }; }
+  };
+  out.phone = await g(`${PHONE_ID}?fields=display_phone_number,verified_name,quality_rating,code_verification_status`);
+  if (WABA_ID) out.waba_phones = await g(`${WABA_ID}/phone_numbers?fields=id,display_phone_number,verified_name`);
+  res.json(out);
 });
 
 app.post('/api/parse', auth, (req, res) => {

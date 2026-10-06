@@ -76,7 +76,7 @@
         <label class="mut"><input type="checkbox" id="tplParam" style="width:auto"> Le modèle contient une variable {{1}} = nom du contact</label></div>
       </div>
       <div class="row"><button id="sendBtn" disabled>Envoyer (un par un)</button>
-      <button id="sendAllBtn" disabled style="background:#075e54">Envoyer à tous simultanément</button><span id="apiStatus" class="mut"></span></div>
+      <button id="sendAllBtn" disabled style="background:#075e54">Envoyer à tous simultanément</button><button class="sec" id="diagBtn" type="button">Tester la connexion</button><span id="apiStatus" class="mut"></span></div>
     </section>
 
     <section class="card" id="tplSection">
@@ -204,6 +204,14 @@ async function loadTemplates() {
   } catch (e) { $('ntMsg').textContent = e.message; }
 }
 $('ntRefresh').onclick = loadTemplates;
+$('diagBtn').onclick = async () => {
+  const r = await fetch('/api/diagnose', { headers: { 'x-app-password': pwd } });
+  const d = await r.json();
+  const p = d.phone || {};
+  const msg = p.error ? 'ERREUR : ' + p.error.message + (p.error.code ? ' (code ' + p.error.code + ')' : '')
+    : 'OK : ' + (p.display_phone_number || '?') + ' - ' + (p.verified_name || '') + ' - qualité ' + (p.quality_rating || '?');
+  alert(msg + (d.waba_phones && d.waba_phones.data ? '\nNuméros du compte : ' + d.waba_phones.data.map(x => x.display_phone_number + ' [' + x.id + ']').join(', ') : '') + (d.waba_phones && d.waba_phones.error ? '\nCompte WABA : ' + d.waba_phones.error.message : ''));
+};
 $('ntBtn').onclick = async () => {
   $('ntMsg').textContent = 'Envoi à Meta…';
   try {
