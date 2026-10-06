@@ -107,6 +107,10 @@ $('loginBtn').onclick = async () => {
     $('cc').textContent = cfg.countryCode;
     $('login').classList.add('hidden');
     $('app').classList.remove('hidden');
+    try {
+      const pre = await api('/api/contacts');
+      if (pre.text) { $('raw').value = pre.text.replace(/^Nom;Contact1;Contact2\r?\n/, ''); $('parseBtn').click(); }
+    } catch (e) {}
     $('apiStatus').textContent = apiOk ? 'API WhatsApp configurée ✔' : 'API non configurée : utilisez le mode « liens ».';
   } catch (e) { $('loginErr').textContent = e.message; }
 };

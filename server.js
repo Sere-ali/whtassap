@@ -119,6 +119,11 @@ app.get('/api/config', auth, (req, res) => {
   res.json({ apiConfigured: Boolean(TOKEN && PHONE_ID), countryCode: CC });
 });
 
+// Liste de contacts préchargée (variable d'environnement CONTACTS_CSV, jamais dans le dépôt public)
+app.get('/api/contacts', auth, (req, res) => {
+  res.json({ text: process.env.CONTACTS_CSV || '' });
+});
+
 app.post('/api/parse', auth, (req, res) => {
   res.json(parseContacts(req.body.text));
 });
