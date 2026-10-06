@@ -11,6 +11,7 @@ const TOKEN = process.env.WHATSAPP_TOKEN || '';
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0';
 const CC = process.env.DEFAULT_COUNTRY_CODE || '225'; // Côte d'Ivoire
+const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '20', 10));
 const DELAY_MS = parseInt(process.env.SEND_DELAY_MS || '1200', 10);
 
 // ---------- Auth ----------
@@ -99,17 +100,30 @@ async function sendOne(contact, opts) {
 const jobs = new Map();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+async function sendTracked(job, c, opts) {
+  try {
+    await sendOne(c, opts);
+    job.sent++;
+    job.results.push({ number: c.number, name: c.name, ok: true });
+  } catch (e) {
+    job.failed++;
+    job.results.push({ number: c.number, name: c.name, ok: false, error: e.message });
+  }
+}
+
 async function runJob(job, opts) {
-  for (const c of job.contacts) {
-    try {
-      await sendOne(c, opts);
-      job.sent++;
-      job.results.push({ number: c.number, name: c.name, ok: true });
-    } catch (e) {
-      job.failed++;
-      job.results.push({ number: c.number, name: c.name, ok: false, error: e.message });
+  if (opts.parallel) {
+    // Envoi simultané : plusieurs messages en même temps (par lots de CONCURRENCY)
+    const queue = job.contacts.slice();
+    const worker = async () => {
+      while (queue.length) await sendTracked(job, queue.shift(), opts);
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker));
+  } else {
+    for (const c of job.contacts) {
+      await sendTracked(job, c, opts);
+      await sleep(DELAY_MS);
     }
-    await sleep(DELAY_MS);
   }
   job.done = true;
 }
@@ -132,7 +146,7 @@ app.post('/api/send', auth, (req, res) => {
   if (!TOKEN || !PHONE_ID) {
     return res.status(400).json({ error: 'WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID non configurés.' });
   }
-  const { contacts, mode, message, templateName, language, useNameParam } = req.body;
+  const { contacts, mode, message, templateName, language, useNameParam, parallel } = req.body;
   if (!Array.isArray(contacts) || contacts.length === 0) return res.status(400).json({ error: 'Aucun contact.' });
   if (contacts.length > 1000) return res.status(400).json({ error: 'Maximum 1000 contacts par envoi.' });
   if (mode === 'template' ? !templateName : !message) {
@@ -144,7 +158,7 @@ app.post('/api/send', auth, (req, res) => {
   const id = crypto.randomUUID();
   const job = { id, total: clean.length, sent: 0, failed: 0, done: false, results: [], contacts: clean };
   jobs.set(id, job);
-  runJob(job, { mode, message, templateName, language, useNameParam });
+  runJob(job, { mode, message, templateName, language, useNameParam, parallel: Boolean(parallel) });
   res.json({ jobId: id, total: clean.length });
 });
 
