@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: whatsapp-diffusion
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: APP_PASSWORD
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: DEFAULT_COUNTRY_CODE
+        value: "225"

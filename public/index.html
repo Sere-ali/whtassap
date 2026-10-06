@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffusion WhatsApp</title>
+<style>
+  :root { --g:#128c7e; --bg:#f3f5f4; --card:#fff; --b:#d8dedc; --t:#1b2420; --mut:#66736d; --err:#c0392b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--t); }
+  header { background:var(--g); color:#fff; padding:14px 20px; font-weight:600; font-size:18px; }
+  main { max-width:900px; margin:20px auto; padding:0 14px 60px; display:grid; gap:16px; }
+  .card { background:var(--card); border:1px solid var(--b); border-radius:10px; padding:16px; }
+  h2 { margin:0 0 10px; font-size:16px; }
+  textarea, input, select { width:100%; padding:9px; border:1px solid var(--b); border-radius:6px; font:inherit; }
+  textarea { min-height:120px; resize:vertical; }
+  button { background:var(--g); color:#fff; border:0; padding:10px 16px; border-radius:6px; font:inherit; cursor:pointer; }
+  button.sec { background:#e6ebe9; color:var(--t); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .mut { color:var(--mut); font-size:13px; }
+  .err { color:var(--err); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  td, th { text-align:left; padding:5px 8px; border-bottom:1px solid var(--b); }
+  .scroll { max-height:260px; overflow:auto; }
+  .bar { height:10px; background:#e6ebe9; border-radius:5px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; background:var(--g); width:0; transition:width .3s; }
+  .ok { color:var(--g); } 
+  a.btn { background:var(--g); color:#fff; padding:4px 10px; border-radius:5px; text-decoration:none; font-size:13px; }
+  a.btn.done { background:#9aa7a2; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>Diffusion WhatsApp</header>
+<main>
+
+  <section class="card" id="login">
+    <h2>Connexion</h2>
+    <input id="pwd" type="password" placeholder="Mot de passe de l'application">
+    <div class="row"><button id="loginBtn">Entrer</button><span class="err" id="loginErr"></span></div>
+  </section>
+
+  <div id="app" class="hidden" style="display:grid;gap:16px">
+
+    <section class="card">
+      <h2>1. Contacts</h2>
+      <p class="mut">Une ligne par contact : <code>Nom; numéro</code> (ou seulement le numéro). Vous pouvez aussi importer un fichier CSV/TXT. Les numéros sont convertis au format international (+<span id="cc">225</span>) et les doublons supprimés.</p>
+      <textarea id="raw" placeholder="Ouattara Salimata; 07 57 05 95 48&#10;Doumbia Djatou; 0758179495"></textarea>
+      <div class="row">
+        <input type="file" id="file" accept=".csv,.txt,.tsv" style="width:auto">
+        <button id="parseBtn">Analyser la liste</button>
+        <span class="mut" id="count"></span>
+      </div>
+      <div id="invalidBox" class="hidden" style="margin-top:10px">
+        <div class="err">Lignes sans numéro valide (à corriger) :</div>
+        <pre class="mut scroll" id="invalid" style="white-space:pre-wrap"></pre>
+      </div>
+      <div class="scroll" style="margin-top:10px"><table id="tbl"></table></div>
+    </section>
+
+    <section class="card">
+      <h2>2. Message</h2>
+      <select id="mode">
+        <option value="links">Sans configuration : liens WhatsApp à ouvrir un par un</option>
+        <option value="text">API WhatsApp : message texte (destinataires ayant écrit il y a moins de 24 h)</option>
+        <option value="template">API WhatsApp : modèle approuvé (nouveaux destinataires)</option>
+      </select>
+      <div id="msgBox" style="margin-top:10px">
+        <textarea id="msg" placeholder="Bonjour {nom}, ..."></textarea>
+        <div class="mut">{nom} sera remplacé par le nom de chaque contact.</div>
+      </div>
+      <div id="tplBox" class="hidden" style="margin-top:10px">
+        <input id="tplName" placeholder="Nom du modèle (ex: rappel_formation)">
+        <div class="row"><input id="tplLang" value="fr" style="width:90px">
+        <label class="mut"><input type="checkbox" id="tplParam" style="width:auto"> Le modèle contient une variable {{1}} = nom du contact</label></div>
+      </div>
+      <div class="row"><button id="sendBtn" disabled>Envoyer</button><span id="apiStatus" class="mut"></span></div>
+    </section>
+
+    <section class="card hidden" id="progress">
+      <h2>3. Suivi</h2>
+      <div id="progText"></div>
+      <div class="bar"><div id="barIn"></div></div>
+      <div class="scroll" style="margin-top:10px"><table id="resTbl"></table></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let pwd = '', contacts = [], apiOk = false;
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { 'Content-Type':'application/json', 'x-app-password': pwd, ...(opts.headers||{}) } });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || 'Erreur ' + r.status);
+  return d;
+}
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+$('loginBtn').onclick = async () => {
+  pwd = $('pwd').value;
+  try {
+    const cfg = await api('/api/config');
+    apiOk = cfg.apiConfigured;
+    $('cc').textContent = cfg.countryCode;
+    $('login').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    $('apiStatus').textContent = apiOk ? 'API WhatsApp configurée ✔' : 'API non configurée : utilisez le mode « liens ».';
+  } catch (e) { $('loginErr').textContent = e.message; }
+};
+$('pwd').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+
+$('file').onchange = async e => { const f = e.target.files[0]; if (f) $('raw').value = await f.text(); };
+
+$('parseBtn').onclick = async () => {
+  const d = await api('/api/parse', { method:'POST', body: JSON.stringify({ text: $('raw').value }) });
+  contacts = d.contacts;
+  $('count').textContent = `${contacts.length} contact(s) valide(s), ${d.invalid.length} ligne(s) invalide(s)`;
+  $('invalidBox').classList.toggle('hidden', d.invalid.length === 0);
+  $('invalid').textContent = d.invalid.join('\n');
+  $('tbl').innerHTML = '<tr><th>Nom</th><th>Numéro</th></tr>' + contacts.map(c => `<tr><td>${esc(c.name)}</td><td>+${c.number}</td></tr>`).join('');
+  $('sendBtn').disabled = contacts.length === 0;
+};
+
+$('mode').onchange = () => {
+  const m = $('mode').value;
+  $('tplBox').classList.toggle('hidden', m !== 'template');
+  $('msgBox').classList.toggle('hidden', m === 'template');
+};
+
+const personalise = c => $('msg').value.replace(/\{nom\}/gi, c.name || '').replace(/ +,/g, ',').trim();
+
+$('sendBtn').onclick = async () => {
+  const mode = $('mode').value;
+  $('progress').classList.remove('hidden');
+
+  if (mode === 'links') {
+    if (!$('msg').value.trim()) return alert('Écrivez un message.');
+    $('progText').textContent = 'Cliquez sur « Ouvrir » pour chaque contact, puis envoyez dans WhatsApp.';
+    $('barIn').style.width = '0';
+    $('resTbl').innerHTML = contacts.map((c, i) =>
+      `<tr><td>${esc(c.name)}</td><td>+${c.number}</td><td><a class="btn" id="l${i}" target="_blank" rel="noopener" href="https://wa.me/${c.number}?text=${encodeURIComponent(personalise(c))}">Ouvrir</a></td></tr>`).join('');
+    contacts.forEach((_, i) => $('l' + i).addEventListener('click', e => e.target.classList.add('done')));
+    return;
+  }
+
+  if (mode === 'text' && !$('msg').value.trim()) return alert('Écrivez un message.');
+  if (!confirm(`Envoyer à ${contacts.length} contact(s) ?`)) return;
+  $('sendBtn').disabled = true;
+  try {
+    const { jobId, total } = await api('/api/send', { method:'POST', body: JSON.stringify({
+      contacts, mode, message: $('msg').value, templateName: $('tplName').value.trim(),
+      language: $('tplLang').value.trim() || 'fr', useNameParam: $('tplParam').checked }) });
+    poll(jobId, total);
+  } catch (e) { alert(e.message); $('sendBtn').disabled = false; }
+};
+
+async function poll(id, total) {
+  const j = await api('/api/job/' + id);
+  const n = j.sent + j.failed;
+  $('barIn').style.width = (n / total * 100) + '%';
+  $('progText').textContent = `${n}/${total} traités — ${j.sent} envoyés, ${j.failed} échecs`;
+  $('resTbl').innerHTML = j.results.map(r =>
+    `<tr><td>${esc(r.name)}</td><td>+${r.number}</td><td class="${r.ok ? 'ok' : 'err'}">${r.ok ? 'Envoyé' : esc(r.error)}</td></tr>`).join('');
+  if (!j.done) setTimeout(() => poll(id, total), 1500);
+  else $('sendBtn').disabled = false;
+}
+</script>
+</body>
+</html>
