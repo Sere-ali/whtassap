@@ -62,7 +62,7 @@
     <section class="card">
       <h2>2. Message</h2>
       <select id="mode">
-        <option value="links">Sans configuration : liens WhatsApp à ouvrir un par un</option>
+        <option value="links">Liens WhatsApp à ouvrir un par un (sans API)</option>
         <option value="text">API WhatsApp : message texte (destinataires ayant écrit il y a moins de 24 h)</option>
         <option value="template">API WhatsApp : modèle approuvé (nouveaux destinataires)</option>
       </select>
@@ -112,6 +112,7 @@ $('loginBtn').onclick = async () => {
       const pre = await api('/api/contacts');
       if (pre.text) { $('raw').value = pre.text.replace(/^Nom;Contact1;Contact2\r?\n/, ''); $('parseBtn').click(); }
     } catch (e) {}
+    if (apiOk) { $('mode').value = 'text'; $('mode').dispatchEvent(new Event('change')); }
     $('apiStatus').textContent = apiOk ? 'API WhatsApp configurée ✔' : 'API non configurée : utilisez le mode « liens ».';
   } catch (e) { $('loginErr').textContent = e.message; }
 };
@@ -164,7 +165,11 @@ async function doSend(parallel) {
 }
 $('sendBtn').onclick = () => doSend(false);
 $('sendAllBtn').onclick = () => {
-  if ($('mode').value === 'links') return alert("L'envoi simultané nécessite l'API WhatsApp : choisissez « API WhatsApp » dans le type de message (le mode liens demande un clic par contact).");
+  if ($('mode').value === 'links') {
+    if (!apiOk) return alert("L'API WhatsApp n'est pas configurée sur le serveur (WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID).");
+    $('mode').value = 'text'; $('mode').dispatchEvent(new Event('change'));
+    return alert("Mode « API WhatsApp : message texte » sélectionné. Vérifiez votre message, puis cliquez de nouveau sur « Envoyer à tous simultanément ».");
+  }
   doSend(true);
 };
 
