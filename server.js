@@ -11,7 +11,7 @@ const TOKEN = process.env.WHATSAPP_TOKEN || '';
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0';
 const CC = process.env.DEFAULT_COUNTRY_CODE || '225'; // Côte d'Ivoire
-const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '50', 10));
+const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '80', 10));
 const MAX_CONTACTS = parseInt(process.env.MAX_CONTACTS || '5000', 10);
 const WABA_ID = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
 const DELAY_MS = parseInt(process.env.SEND_DELAY_MS || '1200', 10);
@@ -107,8 +107,8 @@ async function sendWithRetry(c, opts) {
   for (let attempt = 0; ; attempt++) {
     try { return await sendOne(c, opts); }
     catch (e) {
-      if (attempt >= 4 || !RATE_LIMIT.test(e.message)) throw e;
-      await sleep(1000 * 2 ** attempt); // 1s, 2s, 4s, 8s
+      if (attempt >= 5 || !RATE_LIMIT.test(e.message)) throw e;
+      await sleep(500 * 2 ** attempt); // 0,5s, 1s, 2s, 4s, 8s
     }
   }
 }

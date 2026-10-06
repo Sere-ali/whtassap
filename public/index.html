@@ -220,7 +220,7 @@ async function poll(id, total) {
   $('progText').textContent = `${n}/${total} traités — ${j.sent} envoyés, ${j.failed} échecs`;
   $('resTbl').innerHTML = j.results.map(r =>
     `<tr><td>${esc(r.name)}</td><td>+${r.number}</td><td class="${r.ok ? 'ok' : 'err'}">${r.ok ? 'Envoyé' : esc(r.error)}</td></tr>`).join('');
-  if (!j.done) setTimeout(() => poll(id, total), 1500);
+  if (!j.done) setTimeout(() => poll(id, total), 700);
   else { $('sendBtn').disabled = false; $('sendAllBtn').disabled = false; }
 }
 </script>
