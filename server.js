@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const path = require('path');
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PASSWORD = process.env.APP_PASSWORD || '';
@@ -11,7 +11,8 @@ const TOKEN = process.env.WHATSAPP_TOKEN || '';
 const PHONE_ID = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
 const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0';
 const CC = process.env.DEFAULT_COUNTRY_CODE || '225'; // Côte d'Ivoire
-const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '20', 10));
+const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '50', 10));
+const MAX_CONTACTS = parseInt(process.env.MAX_CONTACTS || '5000', 10);
 const DELAY_MS = parseInt(process.env.SEND_DELAY_MS || '1200', 10);
 
 // ---------- Auth ----------
@@ -100,9 +101,20 @@ async function sendOne(contact, opts) {
 const jobs = new Map();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+const RATE_LIMIT = /rate|too many|throughput|limit|HTTP 429|HTTP 5\d\d/i;
+async function sendWithRetry(c, opts) {
+  for (let attempt = 0; ; attempt++) {
+    try { return await sendOne(c, opts); }
+    catch (e) {
+      if (attempt >= 4 || !RATE_LIMIT.test(e.message)) throw e;
+      await sleep(1000 * 2 ** attempt); // 1s, 2s, 4s, 8s
+    }
+  }
+}
+
 async function sendTracked(job, c, opts) {
   try {
-    await sendOne(c, opts);
+    await sendWithRetry(c, opts);
     job.sent++;
     job.results.push({ number: c.number, name: c.name, ok: true });
   } catch (e) {
@@ -148,7 +160,7 @@ app.post('/api/send', auth, (req, res) => {
   }
   const { contacts, mode, message, templateName, language, useNameParam, parallel } = req.body;
   if (!Array.isArray(contacts) || contacts.length === 0) return res.status(400).json({ error: 'Aucun contact.' });
-  if (contacts.length > 1000) return res.status(400).json({ error: 'Maximum 1000 contacts par envoi.' });
+  if (contacts.length > MAX_CONTACTS) return res.status(400).json({ error: `Maximum ${MAX_CONTACTS} contacts par envoi.` });
   if (mode === 'template' ? !templateName : !message) {
     return res.status(400).json({ error: mode === 'template' ? 'Nom du modèle requis.' : 'Message vide.' });
   }
