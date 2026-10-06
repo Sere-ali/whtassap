@@ -79,6 +79,20 @@
       <button id="sendAllBtn" disabled style="background:#075e54">Envoyer à tous simultanément</button><span id="apiStatus" class="mut"></span></div>
     </section>
 
+    <section class="card" id="tplSection">
+      <h2>Modèles de message (pour écrire à tout le monde)</h2>
+      <p class="mut">WhatsApp exige un modèle <b>approuvé par Meta</b> pour écrire à des personnes qui ne vous ont pas écrit dans les dernières 24 h. Créez-le ici, attendez « APPROVED » (quelques minutes à 24 h), puis cliquez sur « Utiliser ».</p>
+      <input id="ntName" placeholder="Nom du modèle (minuscules et _ ex: rappel_rencontre)">
+      <textarea id="ntText" style="margin-top:8px;min-height:90px" placeholder="Texte du modèle. Utilisez {{1}} pour insérer le nom du contact. Ex : Bonjour {{1}}, ..."></textarea>
+      <div class="row">
+        <select id="ntCat" style="width:auto"><option value="UTILITY">Utilitaire (information, rappel)</option><option value="MARKETING">Marketing (promotion)</option></select>
+        <button id="ntBtn">Créer le modèle</button>
+        <button class="sec" id="ntRefresh">Actualiser la liste</button>
+        <span id="ntMsg" class="mut"></span>
+      </div>
+      <div class="scroll" style="margin-top:10px"><table id="ntTbl"></table></div>
+    </section>
+
     <section class="card hidden" id="progress">
       <h2>3. Suivi</h2>
       <div id="progText"></div>
@@ -113,6 +127,7 @@ $('loginBtn').onclick = async () => {
       if (pre.text) { $('raw').value = pre.text.replace(/^Nom;Contact1;Contact2\r?\n/, ''); $('parseBtn').click(); }
     } catch (e) {}
     if (apiOk) { $('mode').value = 'text'; $('mode').dispatchEvent(new Event('change')); }
+    loadTemplates();
     $('apiStatus').textContent = apiOk ? 'API WhatsApp configurée ✔' : 'API non configurée : utilisez le mode « liens ».';
   } catch (e) { $('loginErr').textContent = e.message; }
 };
@@ -171,6 +186,31 @@ $('sendAllBtn').onclick = () => {
     return alert("Mode « API WhatsApp : message texte » sélectionné. Vérifiez votre message, puis cliquez de nouveau sur « Envoyer à tous simultanément ».");
   }
   doSend(true);
+};
+
+
+async function loadTemplates() {
+  try {
+    const d = await api('/api/templates');
+    $('ntMsg').textContent = '';
+    $('ntTbl').innerHTML = '<tr><th>Nom</th><th>Statut</th><th>Texte</th><th></th></tr>' + d.templates.map(t =>
+      `<tr><td>${esc(t.name)}</td><td class="${t.status === 'APPROVED' ? 'ok' : (t.status === 'REJECTED' ? 'err' : 'mut')}">${esc(t.status)}</td><td>${esc(t.text).slice(0, 80)}</td><td>${t.status === 'APPROVED' ? `<button class="sec" data-use="${esc(t.name)}" data-lang="${esc(t.language)}" data-p="${/\{\{1\}\}/.test(t.text)}">Utiliser</button>` : ''}</td></tr>`).join('');
+    document.querySelectorAll('[data-use]').forEach(b => b.onclick = () => {
+      $('mode').value = 'template'; $('mode').dispatchEvent(new Event('change'));
+      $('tplName').value = b.dataset.use; $('tplLang').value = b.dataset.lang; $('tplParam').checked = b.dataset.p === 'true';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      alert('Modèle « ' + b.dataset.use + ' » sélectionné. Montez, puis cliquez sur « Envoyer à tous simultanément ».');
+    });
+  } catch (e) { $('ntMsg').textContent = e.message; }
+}
+$('ntRefresh').onclick = loadTemplates;
+$('ntBtn').onclick = async () => {
+  $('ntMsg').textContent = 'Envoi à Meta…';
+  try {
+    const d = await api('/api/templates', { method: 'POST', body: JSON.stringify({ name: $('ntName').value.trim(), text: $('ntText').value.trim(), category: $('ntCat').value, language: 'fr' }) });
+    $('ntMsg').textContent = 'Modèle envoyé à Meta (' + d.status + '). Actualisez la liste dans quelques minutes.';
+    loadTemplates();
+  } catch (e) { $('ntMsg').textContent = 'Erreur : ' + e.message; }
 };
 
 async function poll(id, total) {

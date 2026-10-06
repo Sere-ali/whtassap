@@ -13,6 +13,7 @@ const API_VERSION = process.env.WHATSAPP_API_VERSION || 'v21.0';
 const CC = process.env.DEFAULT_COUNTRY_CODE || '225'; // Côte d'Ivoire
 const CONCURRENCY = Math.max(1, parseInt(process.env.SEND_CONCURRENCY || '50', 10));
 const MAX_CONTACTS = parseInt(process.env.MAX_CONTACTS || '5000', 10);
+const WABA_ID = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '';
 const DELAY_MS = parseInt(process.env.SEND_DELAY_MS || '1200', 10);
 
 // ---------- Auth ----------
@@ -148,6 +149,45 @@ app.get('/api/config', auth, (req, res) => {
 // Liste de contacts préchargée (variable d'environnement CONTACTS_CSV, jamais dans le dépôt public)
 app.get('/api/contacts', auth, (req, res) => {
   res.json({ text: process.env.CONTACTS_CSV || '' });
+});
+
+// ---------- Modèles de message (création et suivi chez Meta) ----------
+function graphError(data, status) {
+  const e = (data && data.error) || {};
+  return e.error_user_msg || e.message || `HTTP ${status}`;
+}
+app.get('/api/templates', auth, async (req, res) => {
+  if (!TOKEN || !WABA_ID) return res.status(400).json({ error: 'WHATSAPP_TOKEN / WHATSAPP_BUSINESS_ACCOUNT_ID non configurés.' });
+  try {
+    const r = await fetch(`https://graph.facebook.com/${API_VERSION}/${WABA_ID}/message_templates?fields=name,status,category,language,components&limit=100`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(400).json({ error: graphError(d, r.status) });
+    res.json({ templates: (d.data || []).map(t => ({
+      name: t.name, status: t.status, category: t.category, language: t.language,
+      text: ((t.components || []).find(c => c.type === 'BODY') || {}).text || '',
+    })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/templates', auth, async (req, res) => {
+  if (!TOKEN || !WABA_ID) return res.status(400).json({ error: 'WHATSAPP_TOKEN / WHATSAPP_BUSINESS_ACCOUNT_ID non configurés.' });
+  const { name, text, category, language, exampleName } = req.body || {};
+  if (!/^[a-z0-9_]{1,100}$/.test(name || '')) return res.status(400).json({ error: 'Nom invalide : minuscules, chiffres et _ uniquement (ex: rappel_rencontre).' });
+  if (!text || text.length > 1024) return res.status(400).json({ error: 'Texte requis (1024 caractères maximum).' });
+  const body = { type: 'BODY', text };
+  if (/\{\{1\}\}/.test(text)) body.example = { body_text: [[exampleName || 'Marie']] };
+  try {
+    const r = await fetch(`https://graph.facebook.com/${API_VERSION}/${WABA_ID}/message_templates`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, language: language || 'fr', category: category === 'MARKETING' ? 'MARKETING' : 'UTILITY', components: [body] }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(400).json({ error: graphError(d, r.status) });
+    res.json({ id: d.id, status: d.status || 'PENDING' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/parse', auth, (req, res) => {
