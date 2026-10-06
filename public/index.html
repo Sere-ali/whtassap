@@ -156,6 +156,7 @@ const personalise = c => $('msg').value.replace(/\{nom\}/gi, c.name || '').repla
 
 async function doSend(parallel) {
   const mode = $('mode').value;
+  if (mode === 'text' && !confirm("ATTENTION : en mode « texte libre », WhatsApp accepte l'envoi mais ne LIVRE le message qu'aux personnes qui ont écrit à votre numéro dans les dernières 24 h. Les autres ne recevront rien.\n\nPour joindre tout le monde, utilisez le mode « modèle » (template approuvé).\n\nEnvoyer quand même ?")) return;
   $('progress').classList.remove('hidden');
 
   if (mode === 'links') {
